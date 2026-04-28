@@ -18,6 +18,7 @@
 package av
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -67,16 +68,6 @@ func (kValues *KeyValues) GetBlockValue() (ret *Value) {
 		if KeyTypeBlock == v.Type {
 			ret = v
 			return
-		}
-	}
-	return
-}
-
-func GetKeyBlockValue(blockKeyValues []*KeyValues) (ret *Value) {
-	for _, kv := range blockKeyValues {
-		if KeyTypeBlock == kv.Key.Type && 0 < len(kv.Values) {
-			ret = kv.Values[0]
-			break
 		}
 	}
 	return
@@ -146,6 +137,12 @@ type Key struct {
 
 	// 日期
 	Date *Date `json:"date,omitempty"` // 日期设置
+
+	// 创建时间
+	Created *Created `json:"created,omitempty"` // 创建时间设置
+
+	// 更新时间
+	Updated *Updated `json:"updated,omitempty"` // 更新时间设置
 }
 
 func NewKey(id, name, icon string, keyType KeyType) *Key {
@@ -167,8 +164,17 @@ func (k *Key) GetOption(name string) (ret *SelectOption) {
 	return
 }
 
+type Created struct {
+	IncludeTime bool `json:"includeTime"` // 是否填充具体时间 Add `Include time` switch to database creation time field and update time field https://github.com/siyuan-note/siyuan/issues/12091
+}
+
+type Updated struct {
+	IncludeTime bool `json:"includeTime"` // 是否填充具体时间 Add `Include time` switch to database creation time field and update time field https://github.com/siyuan-note/siyuan/issues/12091
+}
+
 type Date struct {
-	AutoFillNow bool `json:"autoFillNow"` // 是否自动填充当前时间 The database date field supports filling the current time by default https://github.com/siyuan-note/siyuan/issues/10823
+	AutoFillNow      bool `json:"autoFillNow"`      // 是否自动填充当前时间 The database date field supports filling the current time by default https://github.com/siyuan-note/siyuan/issues/10823
+	FillSpecificTime bool `json:"fillSpecificTime"` // 是否填充具体时间 Add `Default fill specific time` switch to database date field https://github.com/siyuan-note/siyuan/issues/12089
 }
 
 type Rollup struct {
@@ -207,6 +213,7 @@ type View struct {
 	LayoutType       LayoutType     `json:"type"`              // 当前布局类型
 	Table            *LayoutTable   `json:"table,omitempty"`   // 表格布局
 	Gallery          *LayoutGallery `json:"gallery,omitempty"` // 卡片布局
+	Kanban           *LayoutKanban  `json:"kanban,omitempty"`  // 看板布局
 	ItemIDs          []string       `json:"itemIds,omitempty"` // 项目 ID 列表，用于维护所有项目
 
 	Group        *ViewGroup `json:"group,omitempty"`     // 分组规则
@@ -219,6 +226,21 @@ type View struct {
 	GroupFolded  bool       `json:"groupFolded"`         // 分组是否折叠
 	GroupHidden  int        `json:"groupHidden"`         // 分组是否隐藏，0：显示，1：空白隐藏，2：手动隐藏
 	GroupSort    int        `json:"groupSort"`           // 分组排序值，用于手动排序
+}
+
+// ViewData 用于序列化视图数据到前端。
+type ViewData struct {
+	ID               string     `json:"id"`
+	Icon             string     `json:"icon"`
+	Name             string     `json:"name"`
+	Desc             string     `json:"desc"`
+	HideAttrViewName bool       `json:"hideAttrViewName"`
+	Type             LayoutType `json:"type"`
+	PageSize         int        `json:"pageSize"`
+}
+
+func (view *View) IsGroupView() bool {
+	return nil != view.Group && "" != view.Group.Field
 }
 
 // GetGroupValue 获取分组视图的分组值。
@@ -270,7 +292,7 @@ func (view *View) RemoveGroupByID(groupID string) {
 
 // GetGroupKey 获取分组视图的分组字段。
 func (view *View) GetGroupKey(attrView *AttributeView) (ret *Key) {
-	if nil == view.Group || "" == view.Group.Field {
+	if !view.IsGroupView() {
 		return
 	}
 
@@ -295,14 +317,15 @@ type LayoutType string
 const (
 	LayoutTypeTable   LayoutType = "table"   // 属性视图类型 - 表格
 	LayoutTypeGallery LayoutType = "gallery" // 属性视图类型 - 卡片
+	LayoutTypeKanban  LayoutType = "kanban"  // 属性视图类型 - 看板
 )
 
 const (
 	ViewDefaultPageSize = 50 // 视图默认分页大小
 )
 
-func NewTableView() (ret *View) {
-	ret = &View{
+func NewTableView() *View {
+	return &View{
 		ID:         ast.NewNodeID(),
 		Name:       GetAttributeViewI18n("table"),
 		Filters:    []*ViewFilter{},
@@ -311,7 +334,6 @@ func NewTableView() (ret *View) {
 		LayoutType: LayoutTypeTable,
 		Table:      NewLayoutTable(),
 	}
-	return
 }
 
 func NewTableViewWithBlockKey(blockKeyID string) (view *View, blockKey, selectKey *Key) {
@@ -334,7 +356,7 @@ func NewTableViewWithBlockKey(blockKeyID string) (view *View, blockKey, selectKe
 }
 
 func NewGalleryView() (ret *View) {
-	ret = &View{
+	return &View{
 		ID:         ast.NewNodeID(),
 		Name:       GetAttributeViewI18n("gallery"),
 		Filters:    []*ViewFilter{},
@@ -343,7 +365,18 @@ func NewGalleryView() (ret *View) {
 		LayoutType: LayoutTypeGallery,
 		Gallery:    NewLayoutGallery(),
 	}
-	return
+}
+
+func NewKanbanView() (ret *View) {
+	return &View{
+		ID:         ast.NewNodeID(),
+		Name:       GetAttributeViewI18n("kanban"),
+		Filters:    []*ViewFilter{},
+		Sorts:      []*ViewSort{},
+		PageSize:   ViewDefaultPageSize,
+		LayoutType: LayoutTypeKanban,
+		Kanban:     NewLayoutKanban(),
+	}
 }
 
 // Viewable 描述了视图的接口。
@@ -379,11 +412,12 @@ type Viewable interface {
 func NewAttributeView(id string) (ret *AttributeView) {
 	view, blockKey, selectKey := NewTableViewWithBlockKey(ast.NewNodeID())
 	ret = &AttributeView{
-		Spec:      3,
-		ID:        id,
-		KeyValues: []*KeyValues{{Key: blockKey}, {Key: selectKey}},
-		ViewID:    view.ID,
-		Views:     []*View{view},
+		Spec:              CurrentSpec,
+		ID:                id,
+		KeyValues:         []*KeyValues{{Key: blockKey}, {Key: selectKey}},
+		ViewID:            view.ID,
+		Views:             []*View{view},
+		RenderedViewables: map[string]Viewable{},
 	}
 	return
 }
@@ -412,6 +446,52 @@ func GetAttributeViewNameByPath(avJSONPath string) (ret string, err error) {
 	return
 }
 
+func GetAttributeViewContent(avID string) (content string) {
+	if "" == avID {
+		return
+	}
+
+	attrView, err := ParseAttributeView(avID)
+	if err != nil {
+		logging.LogErrorf("parse attribute view [%s] failed: %s", avID, err)
+		return
+	}
+	return getAttributeViewContent0(attrView)
+}
+
+func GetAttributeViewContentByPath(avJSONPath string) (content string) {
+	attrView, err := ParseAttributeViewByPath(avJSONPath)
+	if err != nil {
+		logging.LogErrorf("parse attribute view [%s] failed: %s", avJSONPath, err)
+		return
+	}
+	return getAttributeViewContent0(attrView)
+}
+
+func getAttributeViewContent0(attrView *AttributeView) (content string) {
+	buf := bytes.Buffer{}
+	buf.WriteString(attrView.Name)
+	buf.WriteByte(' ')
+	for _, v := range attrView.Views {
+		buf.WriteString(v.Name)
+		buf.WriteByte(' ')
+	}
+
+	for _, keyValues := range attrView.KeyValues {
+		buf.WriteString(keyValues.Key.Name)
+		buf.WriteByte(' ')
+		for _, value := range keyValues.Values {
+			if nil != value {
+				buf.WriteString(value.String(true))
+				buf.WriteByte(' ')
+			}
+		}
+	}
+
+	content = strings.TrimSpace(buf.String())
+	return
+}
+
 func IsAttributeViewExist(avID string) bool {
 	avJSONPath := GetAttributeViewDataPath(avID)
 	return filelock.IsExist(avJSONPath)
@@ -419,11 +499,17 @@ func IsAttributeViewExist(avID string) bool {
 
 func ParseAttributeView(avID string) (ret *AttributeView, err error) {
 	avJSONPath := GetAttributeViewDataPath(avID)
+	return ParseAttributeViewByPath(avJSONPath)
+}
+
+func ParseAttributeViewByPath(avJSONPath string) (ret *AttributeView, err error) {
 	if !filelock.IsExist(avJSONPath) {
 		err = ErrViewNotFound
 		return
 	}
 
+	avID := filepath.Base(avJSONPath)
+	avID = strings.TrimSuffix(avID, filepath.Ext(avID))
 	data, readErr := filelock.ReadFile(avJSONPath)
 	if nil != readErr {
 		logging.LogErrorf("read attribute view [%s] failed: %s", avID, readErr)
@@ -433,7 +519,7 @@ func ParseAttributeView(avID string) (ret *AttributeView, err error) {
 	ret = &AttributeView{RenderedViewables: map[string]Viewable{}}
 	if err = gulu.JSON.UnmarshalJSON(data, ret); err != nil {
 		if strings.Contains(err.Error(), ".relation.contents of type av.Value") {
-			mapAv := map[string]interface{}{}
+			mapAv := map[string]any{}
 			if err = gulu.JSON.UnmarshalJSON(data, &mapAv); err != nil {
 				logging.LogErrorf("unmarshal attribute view [%s] failed: %s", avID, err)
 				return
@@ -441,30 +527,30 @@ func ParseAttributeView(avID string) (ret *AttributeView, err error) {
 
 			// v3.0.3 兼容之前旧版本，将 relation.contents[""] 转换为 null
 			keyValues := mapAv["keyValues"]
-			keyValuesMap := keyValues.([]interface{})
+			keyValuesMap := keyValues.([]any)
 			for _, kv := range keyValuesMap {
-				kvMap := kv.(map[string]interface{})
+				kvMap := kv.(map[string]any)
 				if values := kvMap["values"]; nil != values {
-					valuesMap := values.([]interface{})
+					valuesMap := values.([]any)
 					for _, v := range valuesMap {
-						if vMap := v.(map[string]interface{}); nil != vMap["relation"] {
-							vMap["relation"].(map[string]interface{})["contents"] = nil
+						if vMap := v.(map[string]any); nil != vMap["relation"] {
+							vMap["relation"].(map[string]any)["contents"] = nil
 						}
 					}
 				}
 			}
 
 			views := mapAv["views"]
-			viewsMap := views.([]interface{})
+			viewsMap := views.([]any)
 			for _, view := range viewsMap {
-				if table := view.(map[string]interface{})["table"]; nil != table {
-					tableMap := table.(map[string]interface{})
+				if table := view.(map[string]any)["table"]; nil != table {
+					tableMap := table.(map[string]any)
 					if filters := tableMap["filters"]; nil != filters {
-						filtersMap := filters.([]interface{})
+						filtersMap := filters.([]any)
 						for _, f := range filtersMap {
-							if fMap := f.(map[string]interface{}); nil != fMap["value"] {
-								if valueMap := fMap["value"].(map[string]interface{}); nil != valueMap["relation"] {
-									valueMap["relation"].(map[string]interface{})["contents"] = nil
+							if fMap := f.(map[string]any); nil != fMap["value"] {
+								if valueMap := fMap["value"].(map[string]any); nil != valueMap["relation"] {
+									valueMap["relation"].(map[string]any)["contents"] = nil
 								}
 							}
 						}
@@ -502,22 +588,24 @@ func SaveAttributeView(av *AttributeView) (err error) {
 
 	// 值去重
 	blockValues := av.GetBlockKeyValues()
-	blockIDs := map[string]bool{}
-	var duplicatedValueIDs []string
-	for _, blockValue := range blockValues.Values {
-		if !blockIDs[blockValue.BlockID] {
-			blockIDs[blockValue.BlockID] = true
-		} else {
-			duplicatedValueIDs = append(duplicatedValueIDs, blockValue.ID)
+	if nil != blockValues {
+		blockIDs := map[string]bool{}
+		var duplicatedValueIDs []string
+		for _, blockValue := range blockValues.Values {
+			if !blockIDs[blockValue.BlockID] {
+				blockIDs[blockValue.BlockID] = true
+			} else {
+				duplicatedValueIDs = append(duplicatedValueIDs, blockValue.ID)
+			}
 		}
-	}
-	var tmp []*Value
-	for _, blockValue := range blockValues.Values {
-		if !gulu.Str.Contains(blockValue.ID, duplicatedValueIDs) {
-			tmp = append(tmp, blockValue)
+		var tmp []*Value
+		for _, blockValue := range blockValues.Values {
+			if !gulu.Str.Contains(blockValue.ID, duplicatedValueIDs) {
+				tmp = append(tmp, blockValue)
+			}
 		}
+		blockValues.Values = tmp
 	}
-	blockValues.Values = tmp
 
 	// 视图值去重
 	for _, view := range av.Views {
@@ -527,6 +615,15 @@ func SaveAttributeView(av *AttributeView) (err error) {
 		// 分页大小
 		if 1 > view.PageSize {
 			view.PageSize = ViewDefaultPageSize
+		}
+	}
+
+	// 清理渲染回填值
+	for _, kv := range av.KeyValues {
+		for i := len(kv.Values) - 1; i >= 0; i-- {
+			if kv.Values[i].IsRenderAutoFill {
+				kv.Values = append(kv.Values[:i], kv.Values[i+1:]...)
+			}
 		}
 	}
 
@@ -705,6 +802,13 @@ func (av *AttributeView) Clone() (ret *AttributeView) {
 		oldKeyIDs = append(oldKeyIDs, kv.Key.ID)
 		kv.Key.ID = newID
 		kv.Values = []*Value{}
+
+		if KeyTypeRelation == kv.Key.Type {
+			// 断开关联
+			kv.Key.Relation.IsTwoWay = false
+			kv.Key.Relation.AvID = ""
+			kv.Key.Relation.BackKeyID = ""
+		}
 	}
 
 	oldKeyIDs = gulu.Str.RemoveDuplicatedElem(oldKeyIDs)
@@ -741,6 +845,11 @@ func (av *AttributeView) Clone() (ret *AttributeView) {
 			for _, cardField := range view.Gallery.CardFields {
 				cardField.ID = keyIDMap[cardField.ID]
 			}
+		case LayoutTypeKanban:
+			view.Kanban.ID = ast.NewNodeID()
+			for _, field := range view.Kanban.Fields {
+				field.ID = keyIDMap[field.ID]
+			}
 		}
 		view.ItemIDs = []string{}
 	}
@@ -771,9 +880,10 @@ func GetAttributeViewI18n(key string) string {
 }
 
 var (
-	ErrViewNotFound    = errors.New("view not found")
-	ErrKeyNotFound     = errors.New("key not found")
-	ErrWrongLayoutType = errors.New("wrong layout type")
+	ErrAttributeViewNotFound = errors.New("attribute view not found")
+	ErrViewNotFound          = errors.New("view not found")
+	ErrKeyNotFound           = errors.New("key not found")
+	ErrWrongLayoutType       = errors.New("wrong layout type")
 )
 
 const (

@@ -13,7 +13,7 @@ import {bindRollupData, getRollupHTML} from "./rollup";
 import {Constants} from "../../../constants";
 import * as dayjs from "dayjs";
 import {setPosition} from "../../../util/setPosition";
-import {duplicateNameAddOne} from "../../../util/functions";
+import {duplicateNameAddOne, isMobile} from "../../../util/functions";
 import {Dialog} from "../../../dialog";
 import {escapeAriaLabel, escapeAttr, escapeHtml} from "../../../util/escape";
 import {getFieldsByData} from "./view";
@@ -22,7 +22,7 @@ import {hasClosestByClassName} from "../../util/hasClosest";
 export const getColId = (element: Element, viewType: TAVView) => {
     if (viewType === "table" || hasClosestByClassName(element, "custom-attr")) {
         return element.getAttribute("data-col-id");
-    } else if (viewType === "gallery") {
+    } else if (["gallery", "kanban"].includes(viewType)) {
         return element.getAttribute("data-field-id");
     }
 };
@@ -182,6 +182,18 @@ export const getEditHTML = (options: {
     <span class="fn__flex-center">${window.siyuan.languages.fillCreated}</span>
     <span class="fn__space fn__flex-1"></span>
     <input data-type="fillCreated" type="checkbox" class="b3-switch b3-switch--menu" ${colData.date?.autoFillNow ? "checked" : ""}>
+</label>
+<label class="b3-menu__item">
+    <span class="fn__flex-center">${window.siyuan.languages.fillSpecificTime}</span>
+    <span class="fn__space fn__flex-1"></span>
+    <input data-type="fillSpecificTime" type="checkbox" class="b3-switch b3-switch--menu" ${colData.date?.fillSpecificTime ? "checked" : ""}>
+</label>`;
+    } else if (["updated", "created"].includes(colData.type)) {
+        html += `<button class="b3-menu__separator" data-id="separator_2"></button>
+<label class="b3-menu__item">
+    <span class="fn__flex-center">${window.siyuan.languages.includeTime}</span>
+    <span class="fn__space fn__flex-1"></span>
+    <input data-type="includeTime" type="checkbox" class="b3-switch b3-switch--menu" ${(!colData[colData.type as "updated"] || colData[colData.type as "updated"].includeTime) ? "checked" : ""}>
 </label>`;
     }
     html += `<button class="b3-menu__separator" data-id="separator_3"></button>
@@ -360,6 +372,28 @@ export const bindEditEvent = (options: {
         });
     }
 
+    const includeTimeElement = options.menuElement.querySelector('.b3-switch[data-type="includeTime"]') as HTMLInputElement;
+    if (includeTimeElement) {
+        includeTimeElement.addEventListener("change", () => {
+            transaction(options.protyle, [{
+                action: colData.type === "updated" ? "setAttrViewUpdatedIncludeTime" : "setAttrViewCreatedIncludeTime",
+                id: colId,
+                avID,
+                data: includeTimeElement.checked,
+            }], [{
+                action: colData.type === "updated" ? "setAttrViewUpdatedIncludeTime" : "setAttrViewCreatedIncludeTime",
+                id: colId,
+                avID,
+                data: !includeTimeElement.checked,
+            }]);
+            if (colData[colData.type as "updated"]) {
+                colData[colData.type as "updated"].includeTime = includeTimeElement.checked;
+            } else {
+                colData[colData.type as "updated"] = {includeTime: includeTimeElement.checked};
+            }
+        });
+    }
+
     const wrapElement = options.menuElement.querySelector('.b3-switch[data-type="wrap"]') as HTMLInputElement;
     if (wrapElement) {
         wrapElement.addEventListener("change", () => {
@@ -368,12 +402,14 @@ export const bindEditEvent = (options: {
                 id: colId,
                 avID,
                 data: wrapElement.checked,
-                blockID: options.blockID
+                blockID: options.blockID,
+                viewID: options.data.viewID,
             }], [{
                 action: "setAttrViewColWrap",
                 id: colId,
                 avID,
                 data: !wrapElement.checked,
+                viewID: options.data.viewID,
                 blockID: options.blockID
             }]);
             colData.wrap = wrapElement.checked;
@@ -439,14 +475,31 @@ export const bindEditEvent = (options: {
         fillCreatedElement.addEventListener("change", () => {
             transaction(options.protyle, [{
                 avID,
-                action: "setAttrViewColDate",
+                action: "setAttrViewColDateFillCreated",
                 id: colId,
                 data: fillCreatedElement.checked
             }], [{
                 avID,
-                action: "setAttrViewColDate",
+                action: "setAttrViewColDateFillCreated",
                 id: colId,
                 data: !fillCreatedElement.checked
+            }]);
+        });
+    }
+
+    const fillSpecificTimeElement = options.menuElement.querySelector('[data-type="fillSpecificTime"]') as HTMLInputElement;
+    if (fillSpecificTimeElement) {
+        fillSpecificTimeElement.addEventListener("change", () => {
+            transaction(options.protyle, [{
+                avID,
+                action: "setAttrViewColDateFillSpecificTime",
+                id: colId,
+                data: fillSpecificTimeElement.checked
+            }], [{
+                avID,
+                action: "setAttrViewColDateFillSpecificTime",
+                id: colId,
+                data: !fillSpecificTimeElement.checked
             }]);
         });
     }
@@ -642,9 +695,10 @@ export const showColMenu = (protyle: IProtyle, blockElement: Element, cellElemen
     const colId = cellElement.getAttribute("data-col-id");
     const avID = blockElement.getAttribute("data-av-id");
     const blockID = blockElement.getAttribute("data-node-id");
+    const viewID = blockElement.getAttribute(Constants.CUSTOM_SY_AV_VIEW);
     const oldValue = cellElement.querySelector(".av__celltext").textContent.trim();
     const oldDesc = cellElement.dataset.desc;
-    const menu = new Menu("av-header-cell", () => {
+    const menu = new Menu(Constants.MENU_AV_HEADER_CELL, () => {
         const newValue = (menu.element.querySelector(".b3-text-field") as HTMLInputElement).value;
         if (newValue !== oldValue) {
             transaction(protyle, [{
@@ -784,45 +838,43 @@ export const showColMenu = (protyle: IProtyle, blockElement: Element, cellElemen
 
     // 行号类型不参与筛选和排序
     if (type !== "lineNumber") {
-        if (type !== "mAsset") {
-            menu.addItem({
-                id: "filter",
-                icon: "iconFilter",
-                label: window.siyuan.languages.filter,
-                click() {
-                    fetchPost("/api/av/renderAttributeView", {
-                        id: avID,
-                    }, (response) => {
-                        const avData = response.data as IAV;
-                        let filter: IAVFilter;
-                        avData.view.filters.find((item) => {
-                            if (item.column === colId && item.value.type === type) {
-                                filter = item;
-                                return true;
-                            }
-                        });
-                        let empty = false;
-                        if (!filter) {
-                            empty = true;
-                            filter = {
-                                column: colId,
-                                operator: getDefaultOperatorByType(type),
-                                value: genCellValue(type, ""),
-                            };
-                            avData.view.filters.push(filter);
+        menu.addItem({
+            id: "filter",
+            icon: "iconFilter",
+            label: window.siyuan.languages.filter,
+            click() {
+                fetchPost("/api/av/renderAttributeView", {
+                    id: avID,
+                }, (response) => {
+                    const avData = response.data as IAV;
+                    let filter: IAVFilter;
+                    avData.view.filters.find((item) => {
+                        if (item.column === colId && item.value.type === type) {
+                            filter = item;
+                            return true;
                         }
-                        setFilter({
-                            empty,
-                            filter,
-                            protyle,
-                            data: avData,
-                            blockElement: blockElement,
-                            target: blockElement.querySelector(`.av__row--header .av__cell[data-col-id="${colId}"]`),
-                        });
                     });
-                }
-            });
-        }
+                    let empty = false;
+                    if (!filter) {
+                        empty = true;
+                        filter = {
+                            column: colId,
+                            operator: getDefaultOperatorByType(type),
+                            value: genCellValue(type, ""),
+                        };
+                        avData.view.filters.push(filter);
+                    }
+                    setFilter({
+                        empty,
+                        filter,
+                        protyle,
+                        data: avData,
+                        blockElement: blockElement,
+                        target: blockElement.querySelector(`.av__row--header .av__cell[data-col-id="${colId}"]`),
+                    });
+                });
+            }
+        });
         menu.addItem({
             id: "asc",
             icon: "iconUp",
@@ -926,29 +978,32 @@ export const showColMenu = (protyle: IProtyle, blockElement: Element, cellElemen
                 action: "syncAttrViewTableColWidth",
                 keyID: colId,
                 avID,
-                id: blockElement.getAttribute(Constants.CUSTOM_SY_AV_VIEW),
+                id: viewID,
             }]);
         }
     });
     menu.addItem({
         icon: "iconSoftWrap",
-        label: `<label class="fn__flex" style="margin-bottom: 4px"><span>${window.siyuan.languages.wrap}</span><span class="fn__space fn__flex-1"></span>
+        label: `<label class="fn__flex fn__pointer"><span>${window.siyuan.languages.wrap}</span><span class="fn__space fn__flex-1"></span>
 <input type="checkbox" class="b3-switch b3-switch--menu"${cellElement.dataset.wrap === "true" ? " checked" : ""}></label>`,
         bind(element) {
             const wrapElement = element.querySelector(".b3-switch") as HTMLInputElement;
             wrapElement.addEventListener("change", () => {
+                cellElement.dataset.wrap = wrapElement.checked.toString();
                 transaction(protyle, [{
                     action: "setAttrViewColWrap",
                     id: colId,
                     avID,
                     data: wrapElement.checked,
-                    blockID
+                    blockID,
+                    viewID
                 }], [{
                     action: "setAttrViewColWrap",
                     id: colId,
                     avID,
                     data: !wrapElement.checked,
-                    blockID
+                    blockID,
+                    viewID
                 }]);
                 menu.close();
             });
@@ -1001,7 +1056,7 @@ export const showColMenu = (protyle: IProtyle, blockElement: Element, cellElemen
                     }, (response) => {
                         duplicateCol({
                             blockElement,
-                            viewID: blockElement.getAttribute(Constants.CUSTOM_SY_AV_VIEW),
+                            viewID,
                             protyle,
                             colId,
                             data: response.data
@@ -1038,7 +1093,7 @@ export const showColMenu = (protyle: IProtyle, blockElement: Element, cellElemen
     <div class="fn__hr"></div>
     <button class="fn__block b3-button b3-button--cancel">${window.siyuan.languages.cancel}</button>
 </div>`,
-                            width: "520px",
+                            width: isMobile() ? "92vw" : "520px",
                         });
                         dialog.element.addEventListener("click", (event) => {
                             let target = event.target as HTMLElement;
@@ -1214,7 +1269,7 @@ const genUpdateColItem = (type: TAVCol, oldType: TAVCol) => {
 };
 
 export const addCol = (protyle: IProtyle, blockElement: Element, previousID?: string) => {
-    const menu = new Menu("av-header-add");
+    const menu = new Menu(Constants.MENU_AV_HEADER_ADD);
     const avID = blockElement.getAttribute("data-av-id");
     if (typeof previousID === "undefined" && blockElement.getAttribute("data-av-type") === "table") {
         previousID = Array.from(blockElement.querySelectorAll(".av__row--header .av__cell")).pop().getAttribute("data-col-id");
