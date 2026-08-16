@@ -1,8 +1,9 @@
-import {App} from "../index";
+import type {App} from "../index";
 import {Menu} from "./Menu";
 import {isHuawei, setStorageVal} from "../protyle/util/compatibility";
 /// #if !MOBILE
 import {openSetting} from "../config";
+import {setTabPosition} from "../layout/tabUtil";
 /// #endif
 import {Constants} from "../constants";
 
@@ -15,7 +16,7 @@ export const openTopBarMenu = (app: App, target?: Element) => {
         label: window.siyuan.languages.manage,
         ignore: isHuawei() || window.siyuan.config.readonly,
         click() {
-            openSetting(app).element.querySelector('.b3-tab-bar [data-name="bazaar"]').dispatchEvent(new CustomEvent("click"));
+            openSetting(app, "bazaar");
         }
     });
     menu.addSeparator({id: "separator_1", ignore: isHuawei() || window.siyuan.config.readonly});
@@ -47,6 +48,9 @@ export const openTopBarMenu = (app: App, target?: Element) => {
                         item.classList.add("fn__none");
                     }
                     setStorageVal(Constants.LOCAL_PLUGINTOPUNPIN, window.siyuan.storage[Constants.LOCAL_PLUGINTOPUNPIN]);
+                    /// #if !MOBILE
+                    setTabPosition(true);
+                    /// #endif
                 }
             }];
             if (hasSetting) {
@@ -81,13 +85,10 @@ export const openTopBarMenu = (app: App, target?: Element) => {
                 type: "submenu",
                 submenu
             };
-            if (item.querySelector("use")) {
-                menuOption.icon = item.querySelector("use").getAttribute("xlink:href").replace("#", "");
-            } else {
-                const svgElement = item.querySelector("svg").cloneNode(true) as HTMLElement;
-                svgElement.classList.add("b3-menu__icon");
-                menuOption.iconHTML = svgElement.outerHTML;
-            }
+            const customIconElement = item.querySelector(":scope > .b3-menu__icon--custom");
+            const iconElement = (customIconElement || item.querySelector("svg")).cloneNode(true) as HTMLElement;
+            iconElement.classList.add("b3-menu__icon");
+            menuOption.iconHTML = iconElement.outerHTML;
             menu.addItem(menuOption);
             hasPlugin = true;
             hasTopBar = true;

@@ -1,4 +1,4 @@
-import {App} from "../../index";
+import type {App} from "../../index";
 import {execByCommand} from "../../boot/globalEvent/command/panel";
 import {matchHotKey} from "../../protyle/util/hotKey";
 import {getCurrentEditor} from "../editor";
@@ -9,10 +9,12 @@ export const mobileKeydown = (app: App, event: KeyboardEvent) => {
     if (!event.key || filterHotkey(event, app)) {
         return;
     }
-    const protyle = getCurrentEditor().protyle;
     const matchGeneral = Object.keys(window.siyuan.config.keymap.general).find((key) => {
         if (matchHotKey(window.siyuan.config.keymap.general[key].custom, event)) {
-            execByCommand({command: key, app, protyle, previousRange: protyle.toolbar.range});
+            const protyle = getCurrentEditor()?.protyle;
+            if (protyle) {
+                execByCommand({command: key, app, protyle, previousRange: protyle.toolbar.range});
+            }
             return true;
         }
     });

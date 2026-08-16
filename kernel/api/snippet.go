@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -122,6 +122,13 @@ func setSnippet(c *gin.Context) {
 		}
 		if "" == snippet.ID {
 			snippet.ID = ast.NewNodeID()
+		}
+		if "css" == snippet.Type {
+			if strings.Contains(strings.ToLower(snippet.Content), "</style") || strings.Contains(strings.ToLower(snippet.Content), "<script") {
+				ret.Code = -1
+				ret.Msg = "invalid css snippet content"
+				return
+			}
 		}
 		snippets = append(snippets, snippet)
 	}

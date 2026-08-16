@@ -11,10 +11,10 @@ import {hasClosestBlock, hasClosestByClassName} from "../util/hasClosest";
 import {getContenteditableElement, getTopAloneElement} from "../wysiwyg/getBlock";
 import {replaceFileName} from "../../editor/rename";
 import {transaction} from "../wysiwyg/transaction";
-import {getAssetName, getDisplayName, pathPosix} from "../../util/pathName";
+import {getAssetExtension, getAssetName, getDisplayName, isEncryptedBox} from "../../util/pathName";
 import {genEmptyElement} from "../../block/util";
 import {updateListOrder} from "../wysiwyg/list";
-import {escapeHtml} from "../../util/escape";
+import {escapeHtml, stripSearchMark} from "../../util/escape";
 import {zoomOut} from "../../menus/protyle";
 import {hideElements} from "../ui/hideElements";
 import {genAssetHTML} from "../../asset/renderAssets";
@@ -30,7 +30,8 @@ const getHotkeyOrMarker = (hotkey: string, marker: string) => {
     return "";
 };
 
-export const hintSlash = (key: string, protyle: IProtyle) => {
+export const hintSlash = (key: string, protyle: IProtyle, sourceOrHideConfiguredCreate: THintSource | boolean = false) => {
+    const hideConfiguredCreate = typeof sourceOrHideConfiguredCreate === "boolean" && sourceOrHideConfiguredCreate;
     const allList: IHintData[] = [{
         filter: [window.siyuan.languages.template, "template", "模板", "moban", "muban", "mb"],
         id: "template",
@@ -135,22 +136,22 @@ export const hintSlash = (key: string, protyle: IProtyle) => {
         id: "calloutNote",
         value: `> [!NOTE]\n> ${Lute.Caret}`,
         html: `<div class="b3-list-item__first"><span class="b3-list-item__graphic">✏️</span><span class="b3-list-item__text">${window.siyuan.languages.callout} - <span style="color: var(--b3-callout-note)">Note</span></span></div>`,
-    },{
+    }, {
         filter: [window.siyuan.languages.callout, "callout", "ts", "提示", "tishi", "tip"],
         id: "calloutTip",
         value: `> [!TIP]\n> ${Lute.Caret}`,
         html: `<div class="b3-list-item__first"><span class="b3-list-item__graphic">💡</span><span class="b3-list-item__text">${window.siyuan.languages.callout} - <span style="color: var(--b3-callout-tip)">Tip</span></span></div>`,
-    },{
+    }, {
         filter: [window.siyuan.languages.callout, "callout", "ts", "提示", "tishi", "important"],
         id: "calloutImportant",
         value: `> [!IMPORTANT]\n> ${Lute.Caret}`,
         html: `<div class="b3-list-item__first"><span class="b3-list-item__graphic">❗</span><span class="b3-list-item__text">${window.siyuan.languages.callout} - <span style="color: var(--b3-callout-important)">Important</span></span></div>`,
-    },{
+    }, {
         filter: [window.siyuan.languages.callout, "callout", "ts", "提示", "tishi", "warning"],
         id: "calloutWarning",
         value: `> [!WARNING]\n> ${Lute.Caret}`,
         html: `<div class="b3-list-item__first"><span class="b3-list-item__graphic">⚠️</span><span class="b3-list-item__text">${window.siyuan.languages.callout} - <span style="color: var(--b3-callout-warning)">Warning</span></span></div>`,
-    },{
+    }, {
         filter: [window.siyuan.languages.callout, "callout", "ts", "提示", "tishi", "caution"],
         id: "calloutCaution",
         value: `> [!CAUTION]\n> ${Lute.Caret}`,
@@ -180,6 +181,21 @@ export const hintSlash = (key: string, protyle: IProtyle) => {
         id: "html",
         value: "<div>",
         html: '<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconHTML5"></use></svg><span class="b3-list-item__text">HTML</span></div>',
+    }, {
+        filter: [window.siyuan.languages.databaseTableView, "database table view", "数据库表格视图", "shujukubiaogeshitu", "sjkbgs"],
+        id: "databaseTableView",
+        value: '<div data-type="NodeAttributeView" data-av-type="table"></div>',
+        html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconTable"></use></svg><span class="b3-list-item__text">${window.siyuan.languages.databaseTableView}</span></div>`,
+    }, {
+        filter: [window.siyuan.languages.databaseKanbanView, "database kanban view", "数据库看板视图", "shujukukanbanshitu", "sjkkbs"],
+        id: "databaseKanbanView",
+        value: '<div data-type="NodeAttributeView" data-av-type="kanban"></div>',
+        html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconBoard"></use></svg><span class="b3-list-item__text">${window.siyuan.languages.databaseKanbanView}</span></div>`,
+    }, {
+        filter: [window.siyuan.languages.databaseGalleryView, "database card view", "database gallery view", "数据库卡片视图", "shujukukapianshitu", "sjkkps"],
+        id: "databaseGalleryView",
+        value: '<div data-type="NodeAttributeView" data-av-type="gallery"></div>',
+        html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconGallery"></use></svg><span class="b3-list-item__text">${window.siyuan.languages.databaseGalleryView}</span></div>`,
     }, {
         value: "",
         id: "separator_2",
@@ -243,7 +259,7 @@ export const hintSlash = (key: string, protyle: IProtyle) => {
         filter: [window.siyuan.languages.tag, "tags", "标签", "biaoqian", "bq"],
         id: "tag",
         value: "tag",
-        html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconTags"></use></svg><span class="b3-list-item__text">${window.siyuan.languages.tag}</span><span class="b3-menu__accelerator b3-menu__accelerator--hotkey">${updateHotkeyTip((window.siyuan.config.keymap.editor.insert.tag.custom))}</span></div>`,
+        html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconTag"></use></svg><span class="b3-list-item__text">${window.siyuan.languages.tag}</span><span class="b3-menu__accelerator b3-menu__accelerator--hotkey">${updateHotkeyTip((window.siyuan.config.keymap.editor.insert.tag.custom))}</span></div>`,
     }, {
         filter: [window.siyuan.languages["inline-math"], "inline formulas", "inline math", "行级公式", "hangjigongshi", "hjgs", "行级数学公式", "hangjishuxvegongshi", "hangjishuxuegongshi", "hjsxgs"],
         id: "inlineMath",
@@ -258,12 +274,18 @@ export const hintSlash = (key: string, protyle: IProtyle) => {
         id: "insertAsset",
         value: Constants.ZWSP + 3,
         html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconDownload"></use></svg><span class="b3-list-item__text">${window.siyuan.languages.insertAsset}</span>
-<input class="b3-form__upload" type="file" ${protyle.options.upload.accept ? 'multiple="' + protyle.options.upload.accept + '"' : ""}></div>`,
+<input class="b3-form__upload" type="file" multiple="multiple"${protyle.options.upload.accept ? ' accept="' + protyle.options.upload.accept + '"' : ""}></div>`,
+    }, {
+        filter: [window.siyuan.languages.insertHTMLFile, "embed html file", "iframe", "嵌入 html 文件", "qianruhtmlwenjian", "qrhtmlwj"],
+        id: "insertHTMLFile",
+        value: Constants.ZWSP + 3,
+        html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconHTML5"></use></svg><span class="b3-list-item__text">${window.siyuan.languages.insertHTMLFile}</span>
+<input class="b3-form__upload" data-upload-mode="html-iframe" type="file" multiple="multiple" accept=".html,.htm"></div>`,
     }, {
         filter: [window.siyuan.languages.insertIframeURL, "insert iframe link", "插入 iframe 链接", "charuiframelianjie", "criframelj"],
         id: "insertIframeURL",
-        value: '<iframe sandbox="allow-forms allow-presentation allow-same-origin allow-scripts allow-modals allow-popups" src="" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>',
-        html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconLanguage"></use></svg><span class="b3-list-item__text">${window.siyuan.languages.insertIframeURL}</span></div>`,
+        value: '<iframe sandbox="allow-forms allow-presentation allow-same-origin allow-scripts allow-modals allow-popups allow-storage-access-by-user-activation" src="" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>',
+        html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconGlobe"></use></svg><span class="b3-list-item__text">${window.siyuan.languages.insertIframeURL}</span></div>`,
     }, {
         filter: [window.siyuan.languages.insertImgURL, "insert image link", "image", "img", "插入图片链接", "charutupianlianjie", "crtplj"],
         id: "insertImgURL",
@@ -367,10 +389,11 @@ export const hintSlash = (key: string, protyle: IProtyle) => {
     if (!hasPlugin) {
         allList.pop();
     }
+    const visibleList = hideConfiguredCreate ? allList.filter((item) => item.id !== "newFileRef") : allList;
     if (key === "") {
-        return allList;
+        return visibleList;
     }
-    return allList.filter((item) => {
+    return visibleList.filter((item) => {
         if (!item.filter) {
             return false;
         }
@@ -457,53 +480,82 @@ export const genHintItemHTML = (item: IBlock) => {
 
 export const hintRef = (key: string, protyle: IProtyle, source: THintSource): IHintData[] => {
     const nodeElement = hasClosestBlock(getEditorRange(protyle.wysiwyg.element).startContainer);
+    const createTarget = protyle.hint.prepareCreateTarget(protyle, "ref");
     protyle.hint.genLoading(protyle);
-    fetchPost("/api/search/searchRefBlock", {
-        k: key,
-        id: nodeElement ? nodeElement.getAttribute("data-node-id") : protyle.block.parentID,
-        beforeLen: Math.floor((Math.max(protyle.element.clientWidth / 2, 320) - 58) / 28.8),
-        rootID: source === "av" ? "" : protyle.block.rootID,
-        isDatabase: source === "av",
-        isSquareBrackets: ["[[", "【【"].includes(protyle.hint.splitChar)
-    }, (response) => {
-        const dataList: IHintData[] = [];
-        if (response.data.newDoc) {
-            const newFileName = Lute.UnEscapeHTMLStr(replaceFileName(response.data.k));
-            dataList.push({
-                value: `((newFile "${newFileName}"${Constants.ZWSP}'${newFileName}${Lute.Caret}'))`,
-                html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconFile"></use></svg>
-<span class="b3-list-item__text">${window.siyuan.languages.newFile} <mark>${response.data.k}</mark></span></div>`,
-            });
+    let refParam: IObject;
+    if (protyle.lite) {
+        refParam = {k: key, id: "", rootID: "", beforeLen: 48, isDatabase: false, isSquareBrackets: true};
+    } else {
+        refParam = {
+            k: key,
+            id: nodeElement ? nodeElement.getAttribute("data-node-id") : protyle.block.parentID,
+            beforeLen: Math.floor((Math.max(protyle.element.clientWidth / 2, 320) - 58) / 28.8),
+            rootID: source === "av" ? "" : protyle.block.rootID,
+            isDatabase: source === "av",
+            isSquareBrackets: ["[[", "【【"].includes(protyle.hint.splitChar)
+        };
+        if (isEncryptedBox(protyle.notebookId)) {
+            refParam.notebook = protyle.notebookId;
         }
-        response.data.blocks.forEach((item: IBlock) => {
-            let value = `<span data-type="block-ref" data-id="${item.id}" data-subtype="d">${item.name || item.refText.replace(new RegExp(Constants.ZWSP, "g"), "")}</span>`;
-            if (source === "search") {
-                value = `<span data-type="block-ref" data-id="${item.id}" data-subtype="s">${key}${Constants.ZWSP}${item.name || item.refText.replace(new RegExp(Constants.ZWSP, "g"), "")}</span>`;
-            } else if (source === "av") {
-                let refText = item.name || item.refText.replace(new RegExp(Constants.ZWSP, "g"), "");
-                if (nodeElement) {
-                    refText = item.ial["custom-sy-av-s-text-" + nodeElement.getAttribute("data-av-id")] || refText;
-                }
-                value = `<span data-type="block-ref" data-id="${item.id}" data-subtype="s">${refText}</span>`;
+    }
+    if (protyle.lite && isEncryptedBox(protyle.notebookId)) {
+        refParam.notebook = protyle.notebookId;
+    }
+    fetchPost("/api/search/searchRefBlock", refParam, (response) => {
+        createTarget.promise.then((hideConfiguredCreate) => {
+            if (!createTarget.isCurrent()) {
+                return;
             }
-            dataList.push({
-                value,
-                html: genHintItemHTML(item),
+            const dataList: IHintData[] = [];
+            let createItemCount = 0;
+            if (response.data.newDoc) {
+                const newFileName = Lute.UnEscapeHTMLStr(replaceFileName(response.data.k));
+                if (!hideConfiguredCreate) {
+                    dataList.push({
+                        value: `((newFile "${newFileName}"${Constants.ZWSP}'${newFileName}${Lute.Caret}'))`,
+                        html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconFile"></use></svg>
+<span class="b3-list-item__text">${window.siyuan.languages.newFile} <mark>${response.data.k}</mark></span></div>`,
+                    });
+                    createItemCount++;
+                }
+                dataList.push({
+                    value: `((newSubDoc "${newFileName}"${Constants.ZWSP}'${newFileName}${Lute.Caret}'))`,
+                    html: `<div class="b3-list-item__first"><svg class="b3-list-item__graphic"><use xlink:href="#iconFile"></use></svg>
+<span class="b3-list-item__text">${window.siyuan.languages.newSubDoc} <mark>${response.data.k}</mark></span></div>`,
+                });
+                createItemCount++;
+            }
+            response.data.blocks.forEach((item: IBlock) => {
+                const name = item.name ? stripSearchMark(item.name) : item.refText.replace(new RegExp(Constants.ZWSP, "g"), "");
+                let value = `<span data-type="block-ref" data-id="${item.id}" data-subtype="d">${name}</span>`;
+                if (source === "search") {
+                    value = `<span data-type="block-ref" data-id="${item.id}" data-subtype="s">${key}${Constants.ZWSP}${name}</span>`;
+                } else if (source === "av") {
+                    let refText = name;
+                    if (nodeElement) {
+                        refText = item.ial["custom-sy-av-s-text-" + nodeElement.getAttribute("data-av-id")] || refText;
+                    }
+                    value = `<span data-type="block-ref" data-id="${item.id}" data-subtype="s">${refText}</span>`;
+                }
+                dataList.push({
+                    value,
+                    html: genHintItemHTML(item),
+                });
             });
+            if (source === "search") {
+                protyle.hint.splitChar = "((";
+                protyle.hint.lastIndex = -1;
+            }
+            if (dataList.length === 0) {
+                dataList.push({
+                    value: "",
+                    html: window.siyuan.languages.emptyContent,
+                });
+            } else if (createItemCount > 0 && dataList.length > createItemCount) {
+                dataList[createItemCount].focus = true;
+            }
+            protyle.hint.genHTML(dataList, protyle, true, source);
         });
-        if (source === "search") {
-            protyle.hint.splitChar = "((";
-            protyle.hint.lastIndex = -1;
-        }
-        if (dataList.length === 0) {
-            dataList.push({
-                value: "",
-                html: window.siyuan.languages.emptyContent,
-            });
-        } else if (response.data.newDoc && dataList.length > 1) {
-            dataList[1].focus = true;
-        }
-        protyle.hint.genHTML(dataList, protyle, true, source);
     });
     return [];
 };
@@ -514,13 +566,17 @@ export const hintEmbed = (key: string, protyle: IProtyle): IHintData[] => {
     }
     protyle.hint.genLoading(protyle);
     const nodeElement = hasClosestBlock(getEditorRange(protyle.wysiwyg.element).startContainer);
-    fetchPost("/api/search/searchRefBlock", {
+    const embedParam: IObject = {
         k: key,
         isDatabase: false,
         beforeLen: Math.floor((Math.max(protyle.element.clientWidth / 2, 320) - 58) / 28.8),
         id: nodeElement ? nodeElement.getAttribute("data-node-id") : protyle.block.parentID,
         rootID: protyle.block.rootID,
-    }, (response) => {
+    };
+    if (isEncryptedBox(protyle.notebookId)) {
+        embedParam.notebook = protyle.notebookId;
+    }
+    fetchPost("/api/search/searchRefBlock", embedParam, (response) => {
         const dataList: IHintData[] = [];
         response.data.blocks.forEach((item: IBlock) => {
             dataList.push({
@@ -573,7 +629,7 @@ export const hintRenderWidget = (value: string, protyle: IProtyle) => {
 
 export const hintRenderAssets = (value: string, protyle: IProtyle) => {
     focusByRange(protyle.toolbar.range);
-    const type = pathPosix().extname(value).toLowerCase();
+    const type = getAssetExtension(value).toLowerCase();
     const filename = value.startsWith("assets/") ? getAssetName(value) : value;
     insertHTML(genAssetHTML(type, value, filename, value.startsWith("assets/") ? filename + type : value), protyle);
     hideElements(["util"], protyle);
@@ -622,6 +678,7 @@ export const hintMoveBlock = (pathString: string, sourceElements: Element[], pro
             if (item.classList.contains("protyle-attr")) {
                 return;
             }
+            item.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
             doOperations.push({
                 action: "update",
                 id: item.getAttribute("data-node-id"),

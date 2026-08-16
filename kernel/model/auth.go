@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -19,11 +19,13 @@ package model
 import (
 	"crypto/rand"
 	"net/http"
+	"slices"
 	"sync"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/siyuan-note/logging"
+	"github.com/siyuan-note/siyuan/kernel/conf"
 )
 
 type Account struct {
@@ -42,9 +44,8 @@ const (
 
 	ClaimsContextKey = "claims"
 
-	iss = "siyuan-publish-reverse-proxy-server"
-	sub = "publish"
-	aud = "siyuan-kernel"
+	iss                    = "siyuan-kernel"         // token 的发行者
+	publishServiceAudience = "siyuan-publish-server" // 发布服务 token 的受众
 
 	ClaimsKeyRole string = "role"
 )
@@ -56,6 +57,14 @@ var (
 
 	jwtKey = make([]byte, 32)
 )
+
+func InitJwtKey() error {
+	if _, err := rand.Read(jwtKey); err != nil {
+		logging.LogErrorf("generate JWT signing key failed: %s", err)
+		return err
+	}
+	return nil
+}
 
 func GetBasicAuthAccount(username string) *Account {
 	return accountsMap[username]
@@ -82,7 +91,15 @@ func DeleteSession(sessionID string) {
 	delete(sessionsMap, sessionID)
 }
 
-func InitAccounts() {
+func InitPublishAccounts() {
+	if nil == Conf.Publish {
+		Conf.Publish = conf.NewPublish()
+	}
+	if nil == Conf.Publish.Auth {
+		// 防御 conf.json 中 auth 为 null 的历史坏配置，避免启动时解引用空指针崩溃
+		// https://github.com/siyuan-note/siyuan/security/advisories/GHSA-rp9f-c2fj-h648
+		Conf.Publish.Auth = conf.NewPublish().Auth
+	}
 	accountsMap = AccountsMap{
 		"": &Account{}, // 匿名用户
 	}
@@ -93,10 +110,10 @@ func InitAccounts() {
 		}
 	}
 
-	InitJWT()
+	InitPublishJWT()
 }
 
-func InitJWT() {
+func InitPublishJWT() {
 	if _, err := rand.Read(jwtKey); err != nil {
 		logging.LogErrorf("generate JWT signing key failed: %s", err)
 		return
@@ -107,12 +124,12 @@ func InitJWT() {
 		t := jwt.NewWithClaims(
 			jwt.SigningMethodHS256,
 			jwt.MapClaims{
-				"iss": iss,
-				"sub": sub,
-				"aud": aud,
-				"jti": username,
+				"iss": iss,                    // token 的发行者
+				"sub": username,               // token 代表的主体
+				"aud": publishServiceAudience, // token 的受众
+				"jti": uuid.New().String(),    // token 的唯一标识
 
-				ClaimsKeyRole: RoleReader,
+				ClaimsKeyRole: RoleReader, // 角色
 			},
 		)
 		if token, err := t.SignedString(jwtKey); err != nil {
@@ -124,6 +141,27 @@ func InitJWT() {
 	}
 }
 
+// CreatePluginJWT 为指定名称的内核插件创建一个 JWT，包含管理员权限。插件使用这个 JWT 调用内核 API。
+func CreatePluginJWT(name string) (string, error) {
+	t := jwt.NewWithClaims(
+		jwt.SigningMethodHS256,
+		jwt.MapClaims{
+			"iss": iss,
+			"sub": name,
+			"aud": "siyuan-kernel-plugin",
+			"jti": uuid.New().String(),
+
+			ClaimsKeyRole: RoleAdministrator,
+		},
+	)
+	if token, err := t.SignedString(jwtKey); err != nil {
+		logging.LogErrorf("JWT signature failed: %s", err)
+		return "", err
+	} else {
+		return token, nil
+	}
+}
+
 func ParseJWT(tokenString string) (*jwt.Token, error) {
 	// REF: https://golang-jwt.github.io/jwt/usage/parse/
 	return jwt.Parse(
@@ -132,8 +170,6 @@ func ParseJWT(tokenString string) (*jwt.Token, error) {
 			return jwtKey, nil
 		},
 		jwt.WithIssuer(iss),
-		jwt.WithSubject(sub),
-		jwt.WithAudience(aud),
 	)
 }
 
@@ -166,8 +202,10 @@ func IsPublishServiceToken(token *jwt.Token) bool {
 		return false
 	}
 	claims := GetTokenClaims(token)
-	if tokenIssuer, ok := claims["iss"].(string); ok {
-		return tokenIssuer == iss
+	tokenIssuer, ok := claims["iss"].(string)
+	if !ok || tokenIssuer != iss {
+		return false
 	}
-	return false
+	audience, err := claims.GetAudience()
+	return err == nil && slices.Contains(audience, publishServiceAudience)
 }

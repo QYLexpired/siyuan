@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -117,6 +117,7 @@ func renderPackageREADME(linkBase string, mdData []byte) (ret string) {
 	tree := parse.Parse("", mdData, luteEngine.ParseOptions)
 	normalizeNodesIAL(tree)
 	ret = luteEngine.Tree2HTML(tree, luteEngine.RenderOptions, luteEngine.ParseOptions)
+	ret = util.ConvertIframeToLink(ret)
 	ret = util.LinkTarget(ret, linkBase)
 	return
 }

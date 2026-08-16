@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -104,10 +104,7 @@ func loadTreeNodes(box string, p string, level int) (ret []*ast.Node, err error)
 		return
 	}
 
-	hLevel := level
-	if 6 < level {
-		hLevel = 6
-	}
+	hLevel := min(6, level)
 
 	heading := &ast.Node{ID: tree.Root.ID, Type: ast.NodeHeading, HeadingLevel: hLevel}
 	heading.AppendChild(&ast.Node{Type: ast.NodeText, Tokens: []byte(tree.Root.IALAttr("title"))})
@@ -119,7 +116,11 @@ func loadTreeNodes(box string, p string, level int) (ret []*ast.Node, err error)
 }
 
 func buildBlockChildren(block *Block) (err error) {
-	files, _, err := ListDocTree(block.Box, block.Path, util.SortModeUnassigned, false, false, Conf.FileTree.MaxListCount)
+	listPath := block.Path
+	if IsBoxDoc(block.Box, block.ID) {
+		listPath = "/"
+	}
+	files, _, err := ListDocTree(block.Box, listPath, util.SortModeUnassigned, false, false, Conf.FileTree.MaxListCount)
 	if err != nil {
 		return
 	}

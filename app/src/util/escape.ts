@@ -5,7 +5,11 @@ export const escapeHtml = (html: string) => {
     return html.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 };
 
-export const escapeGreat = (html: string) => {
+export const stripSearchMark = (html: string) => {
+    return html.replace(/<\/?mark>/g, "");
+};
+
+export const escapeLessThans = (html: string) => {
     return html.replace(/</g, "&lt;");
 };
 

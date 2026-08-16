@@ -9,6 +9,7 @@
   &__t,
   &__d {
     position: absolute;
+    touch-action: none;
   }
 
   &__rd {
@@ -76,6 +77,7 @@
   }
 
   &__move {
+    app-region: no-drag;
     cursor: move;
   }
 }

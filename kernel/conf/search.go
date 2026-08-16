@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -44,8 +44,9 @@ type Search struct {
 	WidgetBlock   bool `json:"widgetBlock"`
 	Callout       bool `json:"callout"`
 
-	Limit         int  `json:"limit"`
-	CaseSensitive bool `json:"caseSensitive"`
+	Limit         int   `json:"limit"`
+	CaseSensitive bool  `json:"caseSensitive"`
+	HanSensitive  *bool `json:"hanSensitive"` // 区分繁简：默认开启（与既往行为一致）；关闭后全文搜索不区分简体/繁体中文字形
 
 	Name  bool `json:"name"`
 	Alias bool `json:"alias"`
@@ -89,6 +90,7 @@ func NewSearch() *Search {
 
 		Limit:         64,
 		CaseSensitive: false,
+		HanSensitive:  new(true),
 
 		Name:  true,
 		Alias: true,
@@ -108,6 +110,22 @@ func NewSearch() *Search {
 		VirtualRefAnchor: true,
 		VirtualRefDoc:    true,
 	}
+}
+
+//go:fix inline
+func boolPtr(v bool) *bool { return new(v) }
+
+// HanSensitiveVal 返回 HanSensitive 的 bool 值；nil 视为 true（与既往行为一致）。
+func (s *Search) HanSensitiveVal() bool {
+	if s.HanSensitive == nil {
+		return true
+	}
+	return *s.HanSensitive
+}
+
+// SetHanSensitive 设置 HanSensitive 字段。
+func (s *Search) SetHanSensitive(v bool) {
+	s.HanSensitive = new(v)
 }
 
 func (s *Search) NAMFilter(keyword string) string {

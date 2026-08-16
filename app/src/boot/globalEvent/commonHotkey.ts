@@ -4,7 +4,7 @@ import {fetchPost} from "../../util/fetch";
 import {sendGlobalShortcut} from "./keydown";
 import {ipcRenderer} from "electron";
 /// #endif
-import {App} from "../../index";
+import type {App} from "../../index";
 import {isMac, isNotCtrl, isOnlyMeta} from "../../protyle/util/compatibility";
 import {showPopover} from "../../block/popover";
 
@@ -103,6 +103,10 @@ export const correctHotkey = (app: App) => {
                 Constants.SIYUAN_KEYMAP.general[key].default.replace("⌃", "⌥");
         });
         Constants.SIYUAN_KEYMAP.editor.general.redo.custom = Constants.SIYUAN_KEYMAP.editor.general.redo.default = "⌘Y";
+        Constants.SIYUAN_KEYMAP.editor.general.selectToPageStart.custom =
+            Constants.SIYUAN_KEYMAP.editor.general.selectToPageStart.default = "⇧⌘Home";
+        Constants.SIYUAN_KEYMAP.editor.general.selectToPageEnd.custom =
+            Constants.SIYUAN_KEYMAP.editor.general.selectToPageEnd.default = "⇧⌘End";
     }
     const matchKeymap1 = matchKeymap(Constants.SIYUAN_KEYMAP.general, "general");
     const matchKeymap2 = matchKeymap(Constants.SIYUAN_KEYMAP.editor.general, "editor", "general");
@@ -187,11 +191,14 @@ export const filterHotkey = (event: KeyboardEvent, app: App) => {
     if (!event.altKey && event.shiftKey && isNotCtrl(event)) {
         if (event.key === "Shift") {
             window.siyuan.shiftIsPressed = true;
+            // 按下 Shift 时隐藏表格列宽调整手柄，以便 Shift+滚轮可以横向滚动表格 https://github.com/siyuan-note/siyuan/issues/13828
+            document.body.classList.add("body--shift-pressed");
             if (!event.repeat) {
                 showPopover(app, true);
             }
         } else {
             window.siyuan.shiftIsPressed = false;
+            document.body.classList.remove("body--shift-pressed");
         }
     }
 

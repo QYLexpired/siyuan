@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +44,9 @@ func checkWorkspaceDir(c *gin.Context) {
 	}
 
 	path := arg["path"].(string)
+	if rejectMobileWorkspaceBaseDir(ret, path) {
+		return
+	}
 	// 检查路径是否是分区根路径
 	if util.IsPartitionRootPath(path) {
 		ret.Code = -1
@@ -96,6 +100,9 @@ func createWorkspaceDir(c *gin.Context) {
 	absPath := arg["path"].(string)
 	absPath = util.RemoveInvalid(absPath)
 	absPath = strings.TrimSpace(absPath)
+	if rejectMobileWorkspaceBaseDir(ret, absPath) {
+		return
+	}
 	if isInvalidWorkspacePath(absPath) {
 		ret.Code = -1
 		ret.Msg = "This workspace name is not allowed, please use another name"
@@ -152,7 +159,7 @@ func removeWorkspaceDir(c *gin.Context) {
 		return
 	}
 
-	workspacePaths = gulu.Str.RemoveElem(workspacePaths, path)
+	workspacePaths = util.RemoveWorkspacePath(workspacePaths, path)
 
 	if err = util.WriteWorkspacePaths(workspacePaths); err != nil {
 		ret.Code = -1
@@ -171,13 +178,44 @@ func removeWorkspaceDirPhysically(c *gin.Context) {
 	}
 
 	path := arg["path"].(string)
-	if gulu.File.IsDir(path) {
-		err := os.RemoveAll(path)
-		if err != nil {
-			ret.Code = -1
-			ret.Msg = err.Error()
-			return
-		}
+
+	// 硬边界：只允许删除已登记的工作空间目录，禁止删除当前工作空间和任意路径
+	cleanPath, absErr := filepath.Abs(path)
+	if absErr != nil {
+		ret.Code = -1
+		ret.Msg = absErr.Error()
+		return
+	}
+	if rejectMobileWorkspaceBaseDir(ret, cleanPath) {
+		return
+	}
+	if cleanPath == util.WorkspaceDir {
+		ret.Code = -1
+		ret.Msg = "cannot remove current workspace"
+		return
+	}
+	if !util.IsWorkspaceDir(cleanPath) {
+		ret.Code = -1
+		ret.Msg = "path is not a workspace directory"
+		return
+	}
+	knownPaths, err := util.ReadWorkspacePaths()
+	if err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
+	}
+	isKnown := slices.Contains(knownPaths, cleanPath)
+	if !isKnown {
+		ret.Code = -1
+		ret.Msg = "path is not a registered workspace"
+		return
+	}
+
+	if err := os.RemoveAll(cleanPath); err != nil {
+		ret.Code = -1
+		ret.Msg = err.Error()
+		return
 	}
 
 	logging.LogInfof("removed workspace [%s] physically", path)
@@ -195,7 +233,7 @@ func getMobileWorkspaces(c *gin.Context) {
 	ret := gulu.Ret.NewResult()
 	defer c.JSON(http.StatusOK, ret)
 
-	if util.ContainerIOS != util.Container && util.ContainerAndroid != util.Container && util.ContainerHarmony != util.Container {
+	if !util.IsMobileContainer() {
 		return
 	}
 
@@ -271,6 +309,9 @@ func setWorkspaceDir(c *gin.Context) {
 	}
 
 	path := arg["path"].(string)
+	if rejectMobileWorkspaceBaseDir(ret, path) {
+		return
+	}
 	if util.WorkspaceDir == path {
 		ret.Code = -1
 		ret.Msg = model.Conf.Language(78)
@@ -318,8 +359,8 @@ func setWorkspaceDir(c *gin.Context) {
 	}
 
 	workspacePaths = append(workspacePaths, path)
-	workspacePaths = gulu.Str.RemoveDuplicatedElem(workspacePaths)
-	workspacePaths = gulu.Str.RemoveElem(workspacePaths, path)
+	workspacePaths = util.DeduplicateWorkspacePaths(workspacePaths)
+	workspacePaths = util.RemoveWorkspacePath(workspacePaths, path)
 	workspacePaths = append(workspacePaths, path) // 切换的工作空间固定放在最后一个
 
 	if err = util.WriteWorkspacePaths(workspacePaths); err != nil {
@@ -328,7 +369,7 @@ func setWorkspaceDir(c *gin.Context) {
 		return
 	}
 
-	if util.ContainerAndroid == util.Container || util.ContainerIOS == util.Container || util.ContainerHarmony == util.Container {
+	if util.IsMobileContainer() {
 		util.PushMsg(model.Conf.Language(42), 1000*15)
 		time.Sleep(2 * time.Second)
 	}
@@ -336,6 +377,9 @@ func setWorkspaceDir(c *gin.Context) {
 
 func isInvalidWorkspacePath(absPath string) bool {
 	if "" == absPath {
+		return true
+	}
+	if util.IsMobileWorkspaceBaseDir(absPath) {
 		return true
 	}
 	name := filepath.Base(absPath)
@@ -354,4 +398,14 @@ func isInvalidWorkspacePath(absPath string) bool {
 	}
 	toLower := strings.ToLower(name)
 	return gulu.Str.Contains(toLower, []string{"conf", "home", "data", "temp"})
+}
+
+func rejectMobileWorkspaceBaseDir(ret *gulu.Result, path string) bool {
+	if !util.IsMobileWorkspaceBaseDir(path) {
+		return false
+	}
+	ret.Code = -1
+	ret.Msg = model.Conf.Language(274)
+	ret.Data = map[string]any{"closeTimeout": 7000}
+	return true
 }

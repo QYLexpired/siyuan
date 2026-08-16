@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -32,7 +32,7 @@ import (
 )
 
 func InitAppearance() {
-	util.SetBootDetails("Initializing appearance...")
+	util.SetBootDetails(Conf.Language(302))
 	if err := os.Mkdir(util.AppearancePath, 0755); err != nil && !os.IsExist(err) {
 		logging.LogErrorf("create appearance folder [%s] failed: %s", util.AppearancePath, err)
 		util.ReportFileSysFatalError(err)
@@ -58,8 +58,8 @@ func InitAppearance() {
 		Conf.Appearance.ThemeLight = "daylight"
 		Conf.Appearance.ThemeJS = false
 	}
-	if !gulu.Str.Contains(Conf.Appearance.Icon, Conf.Appearance.Icons) {
-		Conf.Appearance.Icon = "material"
+	if !containIcon(Conf.Appearance.Icon, Conf.Appearance.Icons) {
+		Conf.Appearance.Icon = "litheness"
 	}
 	Conf.m.Unlock()
 
@@ -72,7 +72,7 @@ func SetIcon(icon string) error {
 	Conf.m.Lock()
 	defer Conf.m.Unlock()
 
-	if !gulu.Str.Contains(icon, Conf.Appearance.Icons) {
+	if !containIcon(icon, Conf.Appearance.Icons) {
 		return fmt.Errorf("icon [%s] not exists or not available", icon)
 	}
 	Conf.Appearance.Icon = icon
@@ -126,6 +126,15 @@ func containTheme(name string, themes []*conf.AppearanceTheme) bool {
 	return false
 }
 
+func containIcon(name string, icons []*conf.AppearanceIcon) bool {
+	for _, i := range icons {
+		if i.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func LoadThemes() {
 	themeDirs, err := os.ReadDir(util.ThemesPath)
 	if err != nil {
@@ -147,7 +156,7 @@ func LoadThemes() {
 		}
 		name := themeDir.Name()
 		themeConf, parseErr := bazaar.ParsePackageJSON(filepath.Join(util.ThemesPath, name, "theme.json"))
-		if nil != parseErr || nil == themeConf {
+		if nil != parseErr || !bazaar.IsValidInstalledPackage(themeConf, name) {
 			continue
 		}
 
@@ -156,7 +165,7 @@ func LoadThemes() {
 			modes = *themeConf.Modes
 		}
 		for _, mode := range modes {
-			t := &conf.AppearanceTheme{Name: name}
+			t := &conf.AppearanceTheme{Name: name, Frontends: themeConf.Frontends}
 			if isBuiltInTheme(name) {
 				t.Label = name + Conf.Language(281)
 			} else {
@@ -219,7 +228,7 @@ func LoadIcons() {
 		return
 	}
 
-	var icons []string
+	var icons []*conf.AppearanceIcon
 	var iconVer string
 	currentIcon := Conf.Appearance.Icon
 	for _, iconDir := range iconDirs {
@@ -228,10 +237,25 @@ func LoadIcons() {
 		}
 		name := iconDir.Name()
 		iconConf, err := bazaar.ParsePackageJSON(filepath.Join(util.IconsPath, name, "icon.json"))
-		if err != nil || nil == iconConf {
+		if err != nil || !bazaar.IsValidInstalledPackage(iconConf, name) {
 			continue
 		}
-		icons = append(icons, name)
+		t := &conf.AppearanceIcon{Name: name}
+		if isBuiltInIcon(name) {
+			t.Label = name + Conf.Language(288)
+		} else {
+			t.Label = name
+			if len(iconConf.DisplayName) > 0 {
+				v := strings.TrimSpace(iconConf.DisplayName[util.Lang])
+				if "" == v {
+					v = strings.TrimSpace(iconConf.DisplayName["default"])
+				}
+				if "" != v && name != v {
+					t.Label = v + " (" + name + ")"
+				}
+			}
+		}
+		icons = append(icons, t)
 		if currentIcon == name {
 			iconVer = iconConf.Version
 		}

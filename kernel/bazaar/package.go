@@ -1,4 +1,4 @@
-// SiYuan - Refactor your thinking
+// SiYuan - From thought to insight, with agents
 // Copyright (c) 2020-present, b3log.org
 //
 // This program is free software: you can redistribute it and/or modify
@@ -47,6 +47,7 @@ type Package struct {
 	Version           string        `json:"version"`
 	MinAppVersion     string        `json:"minAppVersion"`
 	DisabledInPublish bool          `json:"disabledInPublish"`
+	Kernels           []string      `json:"kernels"`
 	Backends          []string      `json:"backends"`
 	Frontends         []string      `json:"frontends"`
 	DisplayName       LocaleStrings `json:"displayName"`
@@ -76,17 +77,54 @@ type Package struct {
 	HSize                   string `json:"hSize"`
 	InstallSize             int64  `json:"installSize"`
 	HInstallSize            string `json:"hInstallSize"`
+	InstallTime             int64  `json:"installTime"`
+	UpdateTime              int64  `json:"updateTime"`
 	HInstallDate            string `json:"hInstallDate"`
 	HUpdated                string `json:"hUpdated"`
 	Downloads               int    `json:"downloads"`
 	DisallowInstall         bool   `json:"disallowInstall"`
 	DisallowUpdate          bool   `json:"disallowUpdate"`
-	UpdateRequiredMinAppVer string `json:"updateRequiredMinAppVer"`
+	UpdateRequiredMinAppVer string `json:"updateRequiredMinAppVer,omitempty"` // 升级目标要求的最小应用版本
+	InvalidReason           string `json:"invalidReason,omitempty"`           // 本地安装包异常原因
 
 	// 专用字段，nil 时不序列化
-	Incompatible *bool     `json:"incompatible,omitempty"` // Plugin：是否不兼容
-	Enabled      *bool     `json:"enabled,omitempty"`      // Plugin：是否启用
-	Modes        *[]string `json:"modes,omitempty"`        // Theme：支持的模式列表
+	InstalledIncompatible *bool     `json:"installedIncompatible,omitempty"` // 插件/主题：本地已安装版本是否不兼容
+	BazaarIncompatible    *bool     `json:"bazaarIncompatible,omitempty"`    // 插件/主题：在线集市版本是否不兼容
+	Enabled               *bool     `json:"enabled,omitempty"`               // Plugin：是否启用
+	Modes                 *[]string `json:"modes,omitempty"`                 // Theme：支持的模式列表
+}
+
+const (
+	PackageInvalidReasonMissingManifest = "missing-manifest"
+	PackageInvalidReasonInvalidManifest = "invalid-manifest"
+	PackageInvalidReasonNameMismatch    = "name-mismatch"
+)
+
+var reservedPackageNames = map[string]bool{
+	"CON": true, "PRN": true, "AUX": true, "NUL": true,
+	"COM1": true, "COM2": true, "COM3": true, "COM4": true, "COM5": true,
+	"COM6": true, "COM7": true, "COM8": true, "COM9": true,
+	"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true, "LPT5": true,
+	"LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true,
+}
+
+// IsValidPackageName 判断包名是否可以安全地用作跨平台目录名。
+func IsValidPackageName(packageName string) bool {
+	if len(packageName) < 1 || len(packageName) > 255 || packageName[0] == '.' || packageName[0] == ' ' ||
+		packageName[len(packageName)-1] == '.' || packageName[len(packageName)-1] == ' ' || strings.Contains(packageName, "..") {
+		return false
+	}
+	for _, char := range []byte(packageName) {
+		if char < 0x20 || char > 0x7E || strings.ContainsRune(`<>&'":/\|?*`, rune(char)) {
+			return false
+		}
+	}
+	return !reservedPackageNames[strings.ToUpper(packageName)]
+}
+
+// IsValidInstalledPackage 判断本地集市包的清单名是否与安装目录完全一致。
+func IsValidInstalledPackage(pkg *Package, dirName string) bool {
+	return pkg != nil && pkg.Name == dirName && IsValidPackageName(pkg.Name)
 }
 
 type StageRepo struct {
@@ -124,27 +162,38 @@ func ParsePackageJSON(filePath string) (ret *Package, err error) {
 		return
 	}
 
-	// 仅对本地集市包做 HTML 转义，在线 stage 由 bazaar 工作流处理
-	sanitizePackageDisplayStrings(ret)
 	ret.URL = strings.TrimSuffix(ret.URL, "/")
 	return
 }
 
-// sanitizePackageDisplayStrings 对集市包直接显示的信息做 HTML 转义，避免 XSS。
-func sanitizePackageDisplayStrings(pkg *Package) {
+// unescapePackageDisplayStrings 将在线 stage 中已 HTML 转义的展示字段还原为原文，与本地 JSON 一致。
+func unescapePackageDisplayStrings(pkg *Package) {
 	if pkg == nil {
 		return
 	}
-	pkg.Author = html.EscapeString(pkg.Author)
+	pkg.Name = html.UnescapeString(pkg.Name)
+	pkg.Author = html.UnescapeString(pkg.Author)
+	pkg.Version = html.UnescapeString(pkg.Version)
 	for k, v := range pkg.DisplayName {
-		pkg.DisplayName[k] = html.EscapeString(v)
+		pkg.DisplayName[k] = html.UnescapeString(v)
 	}
 	for k, v := range pkg.Description {
-		pkg.Description[k] = html.EscapeString(v)
+		pkg.Description[k] = html.UnescapeString(v)
+	}
+	if pkg.Funding != nil {
+		pkg.Funding.OpenCollective = html.UnescapeString(pkg.Funding.OpenCollective)
+		pkg.Funding.Patreon = html.UnescapeString(pkg.Funding.Patreon)
+		pkg.Funding.GitHub = html.UnescapeString(pkg.Funding.GitHub)
+		for i, v := range pkg.Funding.Custom {
+			pkg.Funding.Custom[i] = html.UnescapeString(v)
+		}
+	}
+	for i, kw := range pkg.Keywords {
+		pkg.Keywords[i] = html.UnescapeString(kw)
 	}
 }
 
-// GetPreferredLocaleString 从 LocaleStrings 中按当前语种取值，无则回退 default、en_US，再回退 fallback。
+// GetPreferredLocaleString 从 LocaleStrings 中按当前语种取值，无则回退 default、en、en_US（历史命名兼容），再回退 fallback。
 func GetPreferredLocaleString(m LocaleStrings, fallback string) string {
 	if len(m) == 0 {
 		return fallback
@@ -152,7 +201,14 @@ func GetPreferredLocaleString(m LocaleStrings, fallback string) string {
 	if v := strings.TrimSpace(m[util.Lang]); "" != v {
 		return v
 	}
+	// 兼容集市 JSON 数据中历史下划线 key（zh_CN、en_US 等）
+	if v := strings.TrimSpace(m[util.LangToLegacy(util.Lang)]); "" != v {
+		return v
+	}
 	if v := strings.TrimSpace(m["default"]); "" != v {
+		return v
+	}
+	if v := strings.TrimSpace(m["en"]); "" != v {
 		return v
 	}
 	if v := strings.TrimSpace(m["en_US"]); "" != v {
@@ -175,10 +231,39 @@ func getPreferredFunding(funding *Funding) string {
 	if v := normalizeFundingURL(funding.GitHub, "https://github.com/sponsors/"); "" != v {
 		return v
 	}
-	if 0 < len(funding.Custom) {
-		return funding.Custom[0]
+	for _, v := range funding.Custom {
+		if !unsafeFundingURI(v) && "" != strings.TrimSpace(v) {
+			return v
+		}
 	}
 	return ""
+}
+
+// unsafeFundingURI 判断自定义赞助信息是否包含危险或不受支持的 URI 协议。
+func unsafeFundingURI(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if "" == s || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "mailto:") {
+		return false
+	}
+
+	i := strings.IndexByte(s, ':')
+	if i <= 0 {
+		return false
+	}
+	scheme := s[:i]
+	for _, r := range scheme {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '+' && r != '-' && r != '.' {
+			return false
+		}
+	}
+	if scheme[0] < 'a' || scheme[0] > 'z' {
+		return false
+	}
+	switch scheme {
+	case "javascript", "data", "file", "vbscript", "blob":
+		return true
+	}
+	return strings.HasPrefix(s[i:], "://")
 }
 
 func normalizeFundingURL(s, base string) string {
@@ -211,8 +296,8 @@ func getSearchKeywords(query string) (ret []string) {
 	if "" == query {
 		return
 	}
-	keywords := strings.Split(query, " ")
-	for _, k := range keywords {
+	keywords := strings.SplitSeq(query, " ")
+	for k := range keywords {
 		if "" != k {
 			ret = append(ret, strings.ToLower(k))
 		}

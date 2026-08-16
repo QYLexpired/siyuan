@@ -2,17 +2,17 @@ import {openMobileFileById} from "../editor";
 import {
     processSync,
     progressLoading,
-    reloadSync,
     setDefRefCount,
     setRefDynamicText,
     transactionError
 } from "../../dialog/processSystem";
-import {App} from "../../index";
+import type {App} from "../../index";
 import {reloadPlugin} from "../../plugin/loader";
 import {reloadEmoji} from "../../emoji";
-import {setLocalShorthandCount} from "../../util/noRelyPCFunction";
 import {renderSnippet} from "../../config/util/snippets";
 import {redirectToCheckAuth} from "../../util/pathName";
+import {reloadSync} from "../../util/reloadSync";
+import {activateOnboarding} from "../../onboarding";
 
 let statusTimeout: number;
 const statusElement = document.querySelector("#status") as HTMLElement;
@@ -49,9 +49,6 @@ export const onMessage = (app: App, data: IWebSocketData) => {
             case "reloadTag":
                 window.siyuan.mobile.docks.tag?.update();
                 break;
-            case "setLocalShorthandCount":
-                setLocalShorthandCount();
-                break;
             case "setRefDynamicText":
                 setRefDynamicText(data.data);
                 break;
@@ -77,6 +74,37 @@ export const onMessage = (app: App, data: IWebSocketData) => {
             case "readonly":
                 window.siyuan.config.editor.readOnly = data.data;
                 break;
+            case "closeBox":
+            case "removeBox": {
+                window.siyuan.mobile.tabs?.removeNotebook(data.data.box);
+                break;
+            }
+            case "onboarding":
+                void activateOnboarding(app, data.data);
+                break;
+            case "removeDoc":
+                window.siyuan.mobile.tabs?.removeRoots(data.data.ids);
+                if (window.siyuan.config.onboarding?.newUser && !window.siyuan.config.onboarding.dismissed &&
+                    data.data.ids.includes(window.siyuan.config.onboarding.documentID)) {
+                    void activateOnboarding(app, window.siyuan.config.onboarding);
+                }
+                break;
+            case "setLocalStorageVal":
+                window.siyuan.storage[data.data.key] = data.data.val;
+                break;
+            case "setLocalStorageVals":
+                Object.keys(data.data.keyVals).forEach((k) => {
+                    window.siyuan.storage[k] = data.data.keyVals[k];
+                });
+                break;
+            case "removeLocalStorageVal":
+                delete window.siyuan.storage[data.data.key];
+                break;
+            case "removeLocalStorageVals":
+                data.data.keys.forEach((k: string) => {
+                    delete window.siyuan.storage[k];
+                });
+                break;
             case"progress":
                 progressLoading(data);
                 break;
@@ -88,6 +116,12 @@ export const onMessage = (app: App, data: IWebSocketData) => {
                 break;
             case "openFileById":
                 openMobileFileById(app, data.data.id);
+                break;
+            case "filetreeSortChanged":
+                window.siyuan.mobile.docks.file?.onFiletreeSortChanged(data.data);
+                break;
+            case "notebookSortChanged":
+                window.siyuan.mobile.docks.file?.onNotebookSortChanged();
                 break;
             case"txerr":
                 transactionError(data.msg);
